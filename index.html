@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>麻酔科医必要人数モニタリングダッシュボード</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>麻酔科医必要人数モニタリングダッシュボード</h1>
+            <p class="subtitle">手術スケジュールに基づく15分単位の必要人数分析</p>
+        </header>
+
+        <div class="main-content">
+            <!-- データ入力セクション -->
+            <section class="input-section">
+                <h2>データ入力</h2>
+                
+                <div class="input-group">
+                    <label for="excelFile">手術予定スケジュール（Excelファイル）</label>
+                    <input type="file" id="excelFile" accept=".xlsx,.xls" />
+                    <small>必須項目: 入室時刻、手術開始予定時刻、手術終了予定時刻、退室予定時刻、手術内容</small>
+                </div>
+
+                <div class="input-group">
+                    <h3>人員配置</h3>
+                    <div class="doctor-inputs">
+                        <div class="doctor-input">
+                            <label for="resident">初期研修医</label>
+                            <input type="number" id="resident" min="0" value="0" />
+                        </div>
+                        <div class="doctor-input">
+                            <label for="trainee">専攻医（非専門医）</label>
+                            <input type="number" id="trainee" min="0" value="0" />
+                        </div>
+                        <div class="doctor-input">
+                            <label for="fulltime">常勤専門医</label>
+                            <input type="number" id="fulltime" min="0" value="0" />
+                        </div>
+                        <div class="doctor-input">
+                            <label for="parttime">非常勤専門医</label>
+                            <input type="number" id="parttime" min="0" value="0" />
+                        </div>
+                        <div class="doctor-input">
+                            <label for="nurse">麻酔看護師</label>
+                            <input type="number" id="nurse" min="0" value="0" />
+                        </div>
+                    </div>
+                    <div class="total-doctors">
+                        <strong>合計: <span id="totalDoctors">0</span>人</strong>
+                    </div>
+                    <button id="rulesBtn" class="rules-btn">配置ルール設定</button>
+                </div>
+
+                <button id="analyzeBtn" class="analyze-btn" disabled>分析開始</button>
+            </section>
+
+            <!-- 結果表示セクション -->
+            <section class="results-section" id="resultsSection" style="display: none;">
+                <h2>分析結果</h2>
+                
+                <div class="summary-cards">
+                    <div class="summary-card">
+                        <div class="card-label">最大必要人数</div>
+                        <div class="card-value" id="maxRequired">-</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-label">現在の配置人数</div>
+                        <div class="card-value" id="currentStaff">-</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-label">余剰/不足</div>
+                        <div class="card-value" id="surplusDeficit">-</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-label">不足時間帯</div>
+                        <div class="card-value" id="deficitPeriods">-</div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <canvas id="timelineChart"></canvas>
+                </div>
+
+                <div class="table-container">
+                    <h3>15分単位の詳細データ</h3>
+                    <div class="table-wrapper">
+                        <table id="detailTable">
+                            <thead>
+                                <tr>
+                                    <th>時刻</th>
+                                    <th>必要キャパシティ</th>
+                                    <th>供給キャパシティ</th>
+                                    <th>余剰/不足</th>
+                                    <th>状態</th>
+                                    <th>必要な人員構成</th>
+                                </tr>
+                            </thead>
+                            <tbody id="detailTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="timeline-visualization">
+                    <h3>時間帯別担当医割り当て一覧</h3>
+                    <div id="timelineGrid" class="timeline-grid">
+                        <!-- 動的に生成 -->
+                    </div>
+                </div>
+
+                <div class="surgery-list">
+                    <h3>手術スケジュール一覧</h3>
+                    <div class="table-wrapper">
+                        <table id="surgeryTable">
+                            <thead>
+                                <tr>
+                                    <th>入室時刻</th>
+                                    <th>手術開始</th>
+                                    <th>手術終了</th>
+                                    <th>退室時刻</th>
+                                    <th>手術内容</th>
+                                    <th>必要人数</th>
+                                </tr>
+                            </thead>
+                            <tbody id="surgeryTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- 配置ルール設定モーダル -->
+    <div id="rulesModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>配置ルール設定</h2>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="rule-section">
+                    <h3>基本ルール</h3>
+                    <div class="rule-item">
+                        <label>
+                            <input type="checkbox" id="hasSupervisor" />
+                            責任者を1人準備する（原則麻酔を担当しない）
+                        </label>
+                    </div>
+                </div>
+
+                <div class="rule-section">
+                    <h3>各職種の担当制限</h3>
+                    <div class="rule-description">
+                        <p><strong>初期研修医:</strong> 同時に1症例のみ担当可能。必ず専門医とペアで担当（単独不可）</p>
+                        <p><strong>麻酔看護師:</strong> 同時に1症例のみ担当可能。必ず専門医とペアで担当（単独不可）</p>
+                        <p><strong>専攻医（非専門医）:</strong> 同時に1症例のみ担当可能。専門医とペア、または単独でも担当可能（設定で変更可能）</p>
+                    </div>
+                </div>
+
+                <div class="rule-section">
+                    <h3>専門医の担当ルール</h3>
+                    <div class="rule-description">
+                        <p><strong>常勤専門医・非常勤専門医:</strong></p>
+                        <ul>
+                            <li>初期研修医/麻酔看護師と一緒に2人で担当（必須ペア）</li>
+                            <li>専攻医と一緒に2人で担当するか、自分1人で担当</li>
+                            <li>担当症例は同時に2症例まで</li>
+                            <li>1人で麻酔を担当する場合、同時に初期研修医の担当症例を1患者まで指導可能</li>
+                            <li>1人で1症例のみ担当している時間帯は、原則追加の入室症例の担当はしない</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="rule-section">
+                    <h3>詳細設定</h3>
+                    <div class="rule-item">
+                        <label>
+                            <input type="checkbox" id="allowSupervisorAnesthesia" />
+                            責任者も緊急時は麻酔を担当可能にする
+                        </label>
+                    </div>
+                    <div class="rule-item">
+                        <label>
+                            <input type="checkbox" id="strictSingleCaseRule" checked />
+                            専門医が1症例のみ担当中は追加担当を禁止（厳格）
+                        </label>
+                    </div>
+                    <div class="rule-item">
+                        <label>
+                            <input type="checkbox" id="allowTraineeSolo" checked />
+                            専攻医の単独麻酔を許容する
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="saveRulesBtn" class="save-btn">保存</button>
+                <button id="cancelRulesBtn" class="cancel-btn">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
+
